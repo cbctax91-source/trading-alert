@@ -38,33 +38,33 @@ KAKAO_REFRESH_TOKEN = os.environ.get("KAKAO_REFRESH_TOKEN", "")
 KAKAO_CLIENT_SECRET = os.environ.get("KAKAO_CLIENT_SECRET", "")
 
 WATCHLIST = {
-    # --- 기존 ---
-    "비트코인":     "BTC-USD",
-    "삼성전자":     "005930.KS",
-    "SK하이닉스":   "000660.KS",
-    "ASML":        "ASML",
-    "테슬라":       "TSLA",
-    "알파벳A":      "GOOGL",
-    "PTC":         "PTC",
-    "메드트로닉":   "MDT",
-    "일루미나":     "ILMN",
-    # --- 신규 추가 ---
-    "엔비디아":     "NVDA",
-    "스페이스X":    "SPCX",
-    "오라클":       "ORCL",
-    "심보틱":       "SYM",
-    "마이크로소프트": "MSFT",
-    "마이크론":     "MU",
-    "화이자":       "PFE",
+    # --- 기존 9종목 ---
+    "비트코인":       "BTC-USD",
+    "삼성전자":       "005930.KS",
+    "SK하이닉스":     "000660.KS",
+    "ASML":          "ASML",
+    "테슬라":         "TSLA",
+    "알파벳A":        "GOOGL",
+    "PTC":           "PTC",
+    "메드트로닉":     "MDT",
+    "일루미나":       "ILMN",
+    # --- 추가 16종목 ---
+    "엔비디아":       "NVDA",
+    "스페이스X":      "SPCX",
+    "오라클":         "ORCL",
+    "심보틱":         "SYM",
+    "마이크로소프트":  "MSFT",
+    "마이크론":       "MU",
+    "화이자":         "PFE",
     "뱅크오브아메리카": "BAC",
-    "애플":         "AAPL",
-    "테라다인":     "TER",
-    "크리스퍼":     "CRSP",
-    "로쿠":         "ROKU",
-    "팔란티어":     "PLTR",
-    "메타":         "META",
-    "셰브론":       "CVX",
-    "옥시덴털":     "OXY",
+    "애플":           "AAPL",
+    "테라다인":       "TER",
+    "크리스퍼":       "CRSP",
+    "로쿠":           "ROKU",
+    "팔란티어":       "PLTR",
+    "메타":           "META",
+    "셰브론":         "CVX",
+    "옥시덴털":       "OXY",
 }
 
 # ==============================================================================
@@ -183,6 +183,49 @@ def send_kakao(token, text):
 # ==============================================================================
 # 6. 메인
 # ==============================================================================
+def get_live_close_series(ticker):
+    """확정 일봉에 '당일 실시간 현재가'를 진행 중 봉으로 반영한 종가 시리즈 반환.
+       - 장중이면 오늘 실시간가가 마지막 봉이 되어 신호가 실시간 반영됨
+       - 장 마감/휴장이면 야후가 주는 최신 봉을 그대로 사용"""
+    import datetime as dt
+    df = yf.download(ticker, period="6mo", interval="1d",
+                     progress=False, auto_adjust=True)
+    if df is None or len(df) < 35:
+        return None
+    close = df["Close"]
+    if hasattr(close, "columns"):
+        close = close.iloc[:, 0]
+    close = close.dropna()
+
+    # 실시간 현재가 취득 시도 (여러 소스 폴백)
+    live = None
+    try:
+        tk = yf.Ticker(ticker)
+        # 1) fast_info (가장 빠름)
+        fi = getattr(tk, "fast_info", None)
+        if fi:
+            live = fi.get("last_price") or fi.get("lastPrice")
+        # 2) 1분봉 최신값 폴백
+        if not live:
+            intr = tk.history(period="1d", interval="1m")
+            if intr is not None and len(intr) > 0:
+                live = float(intr["Close"].dropna().iloc[-1])
+    except Exception:
+        live = None
+
+    if live and live > 0:
+        live = float(live)
+        today = pd.Timestamp(dt.date.today())
+        last_date = close.index[-1].normalize()
+        if last_date == today:
+            # 오늘 봉이 이미 있으면 종가를 실시간가로 교체
+            close.iloc[-1] = live
+        else:
+            # 오늘 봉이 없으면(=진행중이나 아직 미반영) 실시간가를 새 봉으로 추가
+            close.loc[today] = live
+    return close
+
+
 def main():
     print(f"=== 신호 체크: {dt.datetime.now():%Y-%m-%d %H:%M} (UTC) ===")
     token = refresh_access_token()
@@ -190,13 +233,9 @@ def main():
 
     for name, ticker in WATCHLIST.items():
         try:
-            df = yf.download(ticker, period="6mo", interval="1d",
-                             progress=False, auto_adjust=True)
-            if df is None or len(df) < 35:
+            close = get_live_close_series(ticker)
+            if close is None or len(close) < 35:
                 print(f"  {name}: 데이터부족"); continue
-            close = df["Close"]
-            if hasattr(close, "columns"):
-                close = close.iloc[:, 0]
             macd, sig, _ = calc_macd(close)
             rsi = calc_rsi(close)
             signals, info = detect_signals(macd, sig, rsi)
@@ -212,8 +251,8 @@ def main():
             print(f"  {name} 오류: {e}")
 
     if alerts:
-        header = f"📊 매매신호 ({dt.datetime.now():%m/%d})\n{'='*18}\n"
-        footer = f"\n{'='*18}\n※신호일뿐 매수/매도 명령아님. 차트·손절선 직접확인 후 판단."
+        header = f"📊 매매신호 ({dt.datetime.now():%m/%d %H:%M} · 실시간반영)\n{'='*18}\n"
+        footer = f"\n{'='*18}\n※장중 실시간가 기준(마감때 신호변동 가능). 신호일뿐 매수/매도 명령아님. 차트·손절선 직접확인."
         full = header + "\n\n".join(alerts) + footer
         # 카톡 텍스트 길이 제한(약 2000자) 대비 분할
         if len(full) > 1900:
