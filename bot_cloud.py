@@ -38,15 +38,33 @@ KAKAO_REFRESH_TOKEN = os.environ.get("KAKAO_REFRESH_TOKEN", "")
 KAKAO_CLIENT_SECRET = os.environ.get("KAKAO_CLIENT_SECRET", "")
 
 WATCHLIST = {
-    "비트코인":   "BTC-USD",
-    "삼성전자":   "005930.KS",
-    "SK하이닉스": "000660.KS",
-    "ASML":      "ASML",
-    "테슬라":     "TSLA",
-    "알파벳A":    "GOOGL",
-    "PTC":       "PTC",
-    "메드트로닉": "MDT",
-    "일루미나":   "ILMN",
+    # --- 기존 ---
+    "비트코인":     "BTC-USD",
+    "삼성전자":     "005930.KS",
+    "SK하이닉스":   "000660.KS",
+    "ASML":        "ASML",
+    "테슬라":       "TSLA",
+    "알파벳A":      "GOOGL",
+    "PTC":         "PTC",
+    "메드트로닉":   "MDT",
+    "일루미나":     "ILMN",
+    # --- 신규 추가 ---
+    "엔비디아":     "NVDA",
+    "스페이스X":    "SPCX",
+    "오라클":       "ORCL",
+    "심보틱":       "SYM",
+    "마이크로소프트": "MSFT",
+    "마이크론":     "MU",
+    "화이자":       "PFE",
+    "뱅크오브아메리카": "BAC",
+    "애플":         "AAPL",
+    "테라다인":     "TER",
+    "크리스퍼":     "CRSP",
+    "로쿠":         "ROKU",
+    "팔란티어":     "PLTR",
+    "메타":         "META",
+    "셰브론":       "CVX",
+    "옥시덴털":     "OXY",
 }
 
 # ==============================================================================
