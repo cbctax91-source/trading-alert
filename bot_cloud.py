@@ -30,6 +30,13 @@ except ImportError:
     print("pip install yfinance pandas requests 필요")
     sys.exit(1)
 
+# 한투 REST 현재가 모듈 (같은 폴더의 kis_price.py). 없으면 야후만 사용.
+try:
+    import kis_price
+    KIS_AVAILABLE = True
+except Exception:
+    KIS_AVAILABLE = False
+
 # ==============================================================================
 # 1. 설정 — 환경변수(GitHub Secrets)에서 읽음
 # ==============================================================================
@@ -197,21 +204,31 @@ def get_live_close_series(ticker):
         close = close.iloc[:, 0]
     close = close.dropna()
 
-    # 실시간 현재가 취득 시도 (여러 소스 폴백)
+    # 실시간 현재가 취득 시도
     live = None
-    try:
-        tk = yf.Ticker(ticker)
-        # 1) fast_info (가장 빠름)
-        fi = getattr(tk, "fast_info", None)
-        if fi:
-            live = fi.get("last_price") or fi.get("lastPrice")
-        # 2) 1분봉 최신값 폴백
-        if not live:
-            intr = tk.history(period="1d", interval="1m")
-            if intr is not None and len(intr) > 0:
-                live = float(intr["Close"].dropna().iloc[-1])
-    except Exception:
-        live = None
+
+    # 1) 국내주식이면 한투 REST 우선 (정확한 실시간)
+    if KIS_AVAILABLE:
+        kis_code = kis_price.to_kis_code(ticker)
+        if kis_code:
+            try:
+                live = kis_price.get_kis_domestic_price(kis_code)
+            except Exception:
+                live = None
+
+    # 2) 한투로 못 받았으면(미국주식/코인/실패) 야후로 폴백
+    if not live:
+        try:
+            tk = yf.Ticker(ticker)
+            fi = getattr(tk, "fast_info", None)
+            if fi:
+                live = fi.get("last_price") or fi.get("lastPrice")
+            if not live:
+                intr = tk.history(period="1d", interval="1m")
+                if intr is not None and len(intr) > 0:
+                    live = float(intr["Close"].dropna().iloc[-1])
+        except Exception:
+            live = None
 
     if live and live > 0:
         live = float(live)
@@ -244,7 +261,8 @@ def main():
                 for kind, msg in signals:
                     icon = {"진입":"🟢","청산":"🔴","주의":"🟡","관찰":"🔵"}.get(kind,"")
                     alerts.append(f"{icon}[{name}] {kind}\n  {msg}\n  현재가 {price}/RSI {info['rsi']}/MACD {info['macd']}")
-                print(f"  {name}: {len(signals)}건")
+                    # 로그에도 신호 상세 출력 (GitHub Actions 로그에서 바로 확인용)
+                    print(f"  {icon} {name}: [{kind}] {msg} (현재가 {price}/RSI {info['rsi']}/MACD {info['macd']})")
             else:
                 print(f"  {name}: 신호없음(RSI {info['rsi']})")
         except Exception as e:
