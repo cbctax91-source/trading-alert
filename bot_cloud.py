@@ -75,6 +75,7 @@ WATCHLIST = {
     "옥시덴털":       "OXY",
     # --- 로테이션 대체축 보강 (기술주와 저상관) ---
     "코스트코":       "COST",
+    "치폴레":         "CMG",
     "P&G":           "PG",
     "듀크에너지":     "DUK",
     "GE버노바":       "GEV",
@@ -85,6 +86,11 @@ WATCHLIST = {
     "RTX":           "RTX",
     "일라이릴리":     "LLY",
     "유나이티드헬스": "UNH",
+    # --- 추가 (소비재·미디어) ---
+    "코카콜라":       "KO",
+    "넷플릭스":       "NFLX",
+    "소니":           "SONY",
+    "디즈니":         "DIS",
 }
 
 # ==============================================================================
@@ -260,6 +266,7 @@ def main():
     print(f"=== 신호 체크: {dt.datetime.now():%Y-%m-%d %H:%M} (UTC) ===")
     token = refresh_access_token()
     alerts = []
+    no_signal_brief = []
 
     for name, ticker in WATCHLIST.items():
         try:
@@ -278,6 +285,13 @@ def main():
                     print(f"  {icon} {name}: [{kind}] {msg} (현재가 {price}/RSI {info['rsi']}/MACD {info['macd']})")
             else:
                 print(f"  {name}: 신호없음(RSI {info['rsi']})")
+                # 과매수/과매도 근처만 요약에 포함
+                try:
+                    rv = float(info['rsi'])
+                    if rv <= 35 or rv >= 65:
+                        no_signal_brief.append(f"{name}{rv:.0f}")
+                except Exception:
+                    pass
         except Exception as e:
             print(f"  {name} 오류: {e}")
 
@@ -300,7 +314,13 @@ def main():
             send_kakao(token, full)
             print("  → 발송 완료")
     else:
-        print("  신규 신호 없음 (무신호일은 발송 안 함)")
+        # 신규 신호가 없어도 "무신호" 요약을 발송(봇 생존 확인 겸용)
+        rsi_summary = " · ".join(no_signal_brief[:8]) if no_signal_brief else "데이터 집계중"
+        msg = (f"📊 매매신호 ({dt.datetime.now():%m/%d %H:%M})\n{'='*18}\n"
+               f"🔵 신규 진입/청산 신호 없음\n({len(WATCHLIST)}종목 점검 완료)\n\n"
+               f"참고 RSI: {rsi_summary}")
+        send_kakao(token, msg)
+        print("  신규 신호 없음 → 무신호 요약 발송")
     print("=== 종료 ===")
 
 if __name__ == "__main__":
