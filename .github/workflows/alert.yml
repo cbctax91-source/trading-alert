@@ -1,0 +1,33 @@
+name: 매매신호 카카오알림
+
+# 실행 일정 (UTC 기준 — 한국시간 = UTC + 9시간)
+on:
+  schedule:
+    # 한국시간 오전 7:00 = UTC 22:00 (전날) → 미국장 마감 반영본
+    - cron: '0 22 * * 1-5'
+    # 한국시간 오후 4:00 = UTC 07:00 → 국내장 마감 반영본
+    - cron: '0 7 * * 1-5'
+  # 수동 실행 버튼도 활성화 (테스트용)
+  workflow_dispatch:
+
+jobs:
+  run-bot:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 코드 체크아웃
+        uses: actions/checkout@v4
+
+      - name: 파이썬 설정
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: 라이브러리 설치
+        run: pip install -r requirements.txt
+
+      - name: 봇 실행
+        env:
+          KAKAO_REST_API_KEY: ${{ secrets.KAKAO_REST_API_KEY }}
+          KAKAO_REFRESH_TOKEN: ${{ secrets.KAKAO_REFRESH_TOKEN }}
+          KAKAO_CLIENT_SECRET: ${{ secrets.KAKAO_CLIENT_SECRET }}
+        run: python bot_cloud.py
