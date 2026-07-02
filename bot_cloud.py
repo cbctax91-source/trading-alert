@@ -145,7 +145,9 @@ def calc_rsi(close, period=14):
 # ==============================================================================
 # 4. 신호 감지 (매뉴얼 전략 A/B)
 # ==============================================================================
-def detect_signals(macd, sig, rsi):
+def detect_signals(macd, sig, rsi, vol_ratio=None, above_ma=None):
+    """vol_ratio: 당일거래량/20일평균 (>1.5면 거래량 급증)
+       above_ma: 종가가 추세 이평선(예:60일선) 위인지 (True/False/None)"""
     signals = []
     macd_now, macd_prev = macd.iloc[-1], macd.iloc[-2]
     sig_now,  sig_prev  = sig.iloc[-1],  sig.iloc[-2]
@@ -157,12 +159,35 @@ def detect_signals(macd, sig, rsi):
     rsi_dn50 = (rsi_prev >= 50) and (rsi_now < 50)
     above0 = macd_now > 0
 
+    # --- 보조 필터: 신뢰도 등급 계산 ---
+    def confidence_tag():
+        # 0선 위치 + 거래량 + 추세이평 종합 → 신뢰도 별점
+        score = 0
+        parts = []
+        if above0:
+            score += 1; parts.append("0선위")
+        else:
+            parts.append("0선아래")
+        if vol_ratio is not None:
+            if vol_ratio >= 1.5:
+                score += 1; parts.append(f"거래량급증({vol_ratio:.1f}배)")
+            elif vol_ratio >= 1.0:
+                parts.append(f"거래량보통({vol_ratio:.1f}배)")
+            else:
+                parts.append(f"거래량부족({vol_ratio:.1f}배)")
+        if above_ma is True:
+            score += 1; parts.append("추세위")
+        elif above_ma is False:
+            parts.append("추세아래(역추세주의)")
+        grade = "신뢰상★★★" if score >= 3 else ("신뢰중★★" if score == 2 else "신뢰하★")
+        return grade, " · ".join(parts)
+
     if golden and (50 <= rsi_now <= 70):
-        tag = "0선위(신뢰↑)" if above0 else "0선아래(신뢰↓)"
-        signals.append(("진입", f"전략A 진입조건 충족(골든크로스+RSI{rsi_now:.0f}) [{tag}]"))
+        grade, detail = confidence_tag()
+        signals.append(("진입", f"전략A 진입조건 충족(골든크로스+RSI{rsi_now:.0f}) [{grade}: {detail}]"))
     elif (macd_now > sig_now) and rsi_up50 and (rsi_now <= 70):
-        tag = "0선위(신뢰↑)" if above0 else "0선아래(신뢰↓)"
-        signals.append(("진입", f"RSI 50 상향돌파(정배열 유지) [{tag}]"))
+        grade, detail = confidence_tag()
+        signals.append(("진입", f"RSI 50 상향돌파(정배열 유지) [{grade}: {detail}]"))
     elif golden:
         if rsi_now < 50:
             signals.append(("관찰", f"골든크로스 떴으나 RSI{rsi_now:.0f}(<50) 대기"))
@@ -180,6 +205,10 @@ def detect_signals(macd, sig, rsi):
         signals.append(("주의", f"RSI{rsi_now:.0f} 과매도(반등가능, 단 더빠질수도)"))
 
     info = dict(macd=round(float(macd_now),4), sig=round(float(sig_now),4), rsi=round(float(rsi_now),1))
+    if vol_ratio is not None:
+        info["vol"] = round(float(vol_ratio),1)
+    if above_ma is not None:
+        info["trend"] = "위" if above_ma else "아래"
     return signals, info
 
 # ==============================================================================
@@ -217,7 +246,7 @@ def get_live_close_series(ticker):
     df = yf.download(ticker, period="6mo", interval="1d",
                      progress=False, auto_adjust=True)
     if df is None or len(df) < 35:
-        return None
+        return None, None, None
     close = df["Close"]
     if hasattr(close, "columns"):
         close = close.iloc[:, 0]
@@ -259,7 +288,30 @@ def get_live_close_series(ticker):
         else:
             # 오늘 봉이 없으면(=진행중이나 아직 미반영) 실시간가를 새 봉으로 추가
             close.loc[today] = live
-    return close
+
+    # --- 보조지표: 거래량 비율 + 추세 이평선 위치 ---
+    vol_ratio = None
+    above_ma = None
+    try:
+        vol = df["Volume"]
+        if hasattr(vol, "columns"):
+            vol = vol.iloc[:, 0]
+        vol = vol.dropna()
+        if len(vol) >= 20:
+            vol_ma20 = vol.iloc[-20:].mean()
+            if vol_ma20 > 0:
+                vol_ratio = float(vol.iloc[-1]) / float(vol_ma20)
+    except Exception:
+        vol_ratio = None
+    try:
+        # 60일선 기준 추세(장기추세 필터). 종가가 60일선 위면 상승추세.
+        if len(close) >= 60:
+            ma60 = close.iloc[-60:].mean()
+            above_ma = bool(float(close.iloc[-1]) > float(ma60))
+    except Exception:
+        above_ma = None
+
+    return close, vol_ratio, above_ma
 
 
 def main():
@@ -271,14 +323,14 @@ def main():
 
     for name, ticker in WATCHLIST.items():
         try:
-            close = get_live_close_series(ticker)
+            close, vol_ratio, above_ma = get_live_close_series(ticker)
             if close is None or len(close) < 35:
                 print(f"  {name}: 데이터부족")
                 all_status.append(f"❔{name}: 데이터부족")
                 continue
             macd, sig, _ = calc_macd(close)
             rsi = calc_rsi(close)
-            signals, info = detect_signals(macd, sig, rsi)
+            signals, info = detect_signals(macd, sig, rsi, vol_ratio, above_ma)
             price = round(float(close.iloc[-1]), 2)
             rv = info['rsi']
             if signals:
