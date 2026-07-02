@@ -301,41 +301,45 @@ def main():
         except Exception as e:
             print(f"  {name} 오류: {e}")
 
-    if alerts:
-        header = f"📊 매매신호 ({dt.datetime.now():%m/%d %H:%M} · 실시간반영)\n{'='*18}\n"
-        footer = f"\n{'='*18}\n※장중 실시간가 기준(마감때 신호변동 가능). 신호일뿐 매수/매도 명령아님. 차트·손절선 직접확인."
-        full = header + "\n\n".join(alerts) + footer
-        # 카톡 텍스트 길이 제한(약 2000자) 대비 분할
-        if len(full) > 1900:
-            chunks, cur = [], header
-            for a in alerts:
-                if len(cur)+len(a) > 1700:
-                    chunks.append(cur); cur = ""
-                cur += a + "\n\n"
-            chunks.append(cur + footer)
-            for c in chunks:
-                send_kakao(token, c)
-            print(f"  → 발송 {len(chunks)}개 메시지로 분할")
-        else:
-            send_kakao(token, full)
-            print("  → 발송 완료")
+    # ===== 항상 전 종목 현황을 발송 (신호 있으면 상단에 상세 첨부) =====
+    now = dt.datetime.now()
+    sig_count = len(alerts)
+
+    # 1) 헤더
+    if sig_count > 0:
+        header = (f"📊 매매신호 ({now:%m/%d %H:%M} · 실시간반영)\n{'='*18}\n"
+                  f"🔔 신규 신호 {sig_count}건 발생!\n\n")
     else:
-        # 신규 신호가 없어도 전 종목 RSI 현황을 발송(봇 생존 확인 + 전체 모니터링)
-        header = (f"📊 매매신호 ({dt.datetime.now():%m/%d %H:%M})\n{'='*18}\n"
-                  f"🔵 신규 진입/청산 신호 없음\n전 종목 RSI 현황 ({len(WATCHLIST)}종목):\n\n")
-        body_lines = all_status
-        # 카톡 길이 제한 대비 분할 발송
-        chunks, cur = [], header
-        for line in body_lines:
-            if len(cur) + len(line) > 1700:
-                chunks.append(cur); cur = ""
-            cur += line + "\n"
-        if cur.strip():
-            chunks.append(cur)
-        for i, c in enumerate(chunks):
-            tail = f"\n({i+1}/{len(chunks)})" if len(chunks) > 1 else ""
-            send_kakao(token, c + tail)
-        print(f"  신규 신호 없음 → 전 종목 현황 {len(chunks)}개 메시지로 발송")
+        header = (f"📊 매매신호 ({now:%m/%d %H:%M})\n{'='*18}\n"
+                  f"🔵 신규 진입/청산 신호 없음\n\n")
+
+    # 2) 신호 상세 블록 (있을 때만)
+    detail = ""
+    if sig_count > 0:
+        detail = "【신호 상세】\n" + "\n\n".join(alerts) + f"\n\n{'-'*18}\n"
+
+    # 3) 전 종목 현황 블록 (항상)
+    status_title = f"【전 종목 현황 ({len(WATCHLIST)}종목)】\n"
+    footer = f"\n{'='*18}\n※신호일뿐 매수/매도 명령아님. 차트·손절선 직접확인."
+
+    # 4) 조립 + 카톡 길이 제한(약 2000자) 대비 분할
+    #    - 첫 메시지: 헤더 + (신호상세) + 현황 시작
+    #    - 넘치면 현황을 여러 메시지로 분할
+    chunks = []
+    cur = header + detail + status_title
+    for line in all_status:
+        if len(cur) + len(line) > 1700:
+            chunks.append(cur); cur = ""
+        cur += line + "\n"
+    if cur.strip():
+        chunks.append(cur)
+    # 마지막에 footer 부착
+    chunks[-1] = chunks[-1] + footer
+
+    for i, c in enumerate(chunks):
+        tail = f"\n({i+1}/{len(chunks)})" if len(chunks) > 1 else ""
+        send_kakao(token, c + tail)
+    print(f"  → 전 종목 현황 발송 (신호 {sig_count}건, 카톡 {len(chunks)}개)")
     print("=== 종료 ===")
 
 if __name__ == "__main__":
