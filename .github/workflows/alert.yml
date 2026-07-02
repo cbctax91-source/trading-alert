@@ -1,24 +1,24 @@
 name: 매매신호 카카오알림
 
 # ============================================================
-# 실행 일정 (cron은 UTC 기준. 한국시간 KST = UTC + 9)
-#  ※ 정각(0분/30분)은 GitHub 트래픽 몰림으로 지연·누락 잦음
-#    → 애매한 분(7분/37분)으로 설정해 누락 최소화
-#
-#  ● 한국장 (KST 09:00~15:30) : 1시간 간격
-#  ● 미국장 (서머타임 ET 09:30~16:00 = KST 22:30~05:00) : 1시간 간격
+# 실행 방식 (2가지 병행)
+#  1) GitHub 자체 schedule (백업용, 누락 잦음)
+#  2) 외부 스케줄러(cron-job.org)가 repository_dispatch로 깨움 (주력, 정확)
+#  cron은 UTC 기준. 한국시간 KST = UTC + 9
 # ============================================================
 on:
-  schedule:
-    # ---- 한국장 (KST 09:07~14:07 + 마감) ----
-    - cron: '7 0-5 * * 1-5'       # KST 09:07,10:07,11:07,12:07,13:07,14:07
-    - cron: '37 6 * * 1-5'        # KST 15:37 (마감 직후)
+  # 외부 스케줄러(cron-job.org)가 이걸로 깨움 — 정확한 자동실행
+  repository_dispatch:
+    types: [run-bot]
 
-    # ---- 미국장 (서머타임 기준, 겨울 보정 포함) ----
-    - cron: '37 13 * * 1-5'       # 미국장 시작 무렵 (KST 22:37)
-    - cron: '37 14-19 * * 1-5'    # 장중 1시간 간격 (KST 23:37~04:37)
-    - cron: '7 20 * * 1-5'        # 서머타임 마감 무렵 (KST 05:07)
-    - cron: '7 21 * * 1-5'        # 겨울(EST) 마감 보정 (KST 06:07)
+  # GitHub 자체 스케줄 (백업. 누락될 수 있음)
+  schedule:
+    - cron: '7 0-5 * * 1-5'
+    - cron: '37 6 * * 1-5'
+    - cron: '37 13 * * 1-5'
+    - cron: '37 14-19 * * 1-5'
+    - cron: '7 20 * * 1-5'
+    - cron: '7 21 * * 1-5'
 
   # 수동 실행 버튼
   workflow_dispatch:
@@ -29,15 +29,12 @@ jobs:
     steps:
       - name: 코드 체크아웃
         uses: actions/checkout@v4
-
       - name: 파이썬 설정
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-
       - name: 라이브러리 설치
         run: pip install -r requirements.txt
-
       - name: 봇 실행
         env:
           KAKAO_REST_API_KEY: ${{ secrets.KAKAO_REST_API_KEY }}
