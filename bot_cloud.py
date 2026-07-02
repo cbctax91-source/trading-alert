@@ -267,29 +267,35 @@ def main():
     token = refresh_access_token()
     alerts = []
     no_signal_brief = []
+    all_status = []   # 전 종목 상태(RSI) 수집
 
     for name, ticker in WATCHLIST.items():
         try:
             close = get_live_close_series(ticker)
             if close is None or len(close) < 35:
-                print(f"  {name}: 데이터부족"); continue
+                print(f"  {name}: 데이터부족")
+                all_status.append(f"❔{name}: 데이터부족")
+                continue
             macd, sig, _ = calc_macd(close)
             rsi = calc_rsi(close)
             signals, info = detect_signals(macd, sig, rsi)
             price = round(float(close.iloc[-1]), 2)
+            rv = info['rsi']
             if signals:
+                # 대표 신호 아이콘 하나(우선순위: 진입>청산>주의>관찰)
+                kinds = [k for k,_ in signals]
+                mark = "🟢" if "진입" in kinds else ("🔴" if "청산" in kinds else ("🟡" if "주의" in kinds else "🔵"))
                 for kind, msg in signals:
                     icon = {"진입":"🟢","청산":"🔴","주의":"🟡","관찰":"🔵"}.get(kind,"")
-                    alerts.append(f"{icon}[{name}] {kind}\n  {msg}\n  현재가 {price}/RSI {info['rsi']}/MACD {info['macd']}")
-                    # 로그에도 신호 상세 출력 (GitHub Actions 로그에서 바로 확인용)
-                    print(f"  {icon} {name}: [{kind}] {msg} (현재가 {price}/RSI {info['rsi']}/MACD {info['macd']})")
+                    alerts.append(f"{icon}[{name}] {kind}\n  {msg}\n  현재가 {price}/RSI {rv}/MACD {info['macd']}")
+                    print(f"  {icon} {name}: [{kind}] {msg} (현재가 {price}/RSI {rv}/MACD {info['macd']})")
+                all_status.append(f"{mark}{name}: RSI {rv} ({kinds[0]})")
             else:
-                print(f"  {name}: 신호없음(RSI {info['rsi']})")
-                # 과매수/과매도 근처만 요약에 포함
+                print(f"  {name}: 신호없음(RSI {rv})")
+                all_status.append(f"⚪{name}: RSI {rv}")
                 try:
-                    rv = float(info['rsi'])
-                    if rv <= 35 or rv >= 65:
-                        no_signal_brief.append(f"{name}{rv:.0f}")
+                    if float(rv) <= 35 or float(rv) >= 65:
+                        no_signal_brief.append(f"{name}{float(rv):.0f}")
                 except Exception:
                     pass
         except Exception as e:
@@ -314,13 +320,22 @@ def main():
             send_kakao(token, full)
             print("  → 발송 완료")
     else:
-        # 신규 신호가 없어도 "무신호" 요약을 발송(봇 생존 확인 겸용)
-        rsi_summary = " · ".join(no_signal_brief[:8]) if no_signal_brief else "데이터 집계중"
-        msg = (f"📊 매매신호 ({dt.datetime.now():%m/%d %H:%M})\n{'='*18}\n"
-               f"🔵 신규 진입/청산 신호 없음\n({len(WATCHLIST)}종목 점검 완료)\n\n"
-               f"참고 RSI: {rsi_summary}")
-        send_kakao(token, msg)
-        print("  신규 신호 없음 → 무신호 요약 발송")
+        # 신규 신호가 없어도 전 종목 RSI 현황을 발송(봇 생존 확인 + 전체 모니터링)
+        header = (f"📊 매매신호 ({dt.datetime.now():%m/%d %H:%M})\n{'='*18}\n"
+                  f"🔵 신규 진입/청산 신호 없음\n전 종목 RSI 현황 ({len(WATCHLIST)}종목):\n\n")
+        body_lines = all_status
+        # 카톡 길이 제한 대비 분할 발송
+        chunks, cur = [], header
+        for line in body_lines:
+            if len(cur) + len(line) > 1700:
+                chunks.append(cur); cur = ""
+            cur += line + "\n"
+        if cur.strip():
+            chunks.append(cur)
+        for i, c in enumerate(chunks):
+            tail = f"\n({i+1}/{len(chunks)})" if len(chunks) > 1 else ""
+            send_kakao(token, c + tail)
+        print(f"  신규 신호 없음 → 전 종목 현황 {len(chunks)}개 메시지로 발송")
     print("=== 종료 ===")
 
 if __name__ == "__main__":
