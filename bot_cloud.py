@@ -304,41 +304,42 @@ def main():
     # ===== 항상 전 종목 현황을 발송 (신호 있으면 상단에 상세 첨부) =====
     now = dt.datetime.now()
     sig_count = len(alerts)
+    MAXLEN = 800   # 카카오 실제 한도 대비 보수적
 
-    # 1) 헤더
+    # 발송할 "블록" 리스트를 순서대로 구성 → 800자 기준으로 이어붙여 분할
+    blocks = []
     if sig_count > 0:
-        header = (f"📊 매매신호 ({now:%m/%d %H:%M} · 실시간반영)\n{'='*18}\n"
-                  f"🔔 신규 신호 {sig_count}건 발생!\n\n")
+        blocks.append(f"🔔 신규 신호 {sig_count}건 발생!\n【신호 상세】")
+        blocks.extend(alerts)           # 각 신호를 개별 블록으로
+        blocks.append(f"{'-'*18}")
     else:
-        header = (f"📊 매매신호 ({now:%m/%d %H:%M})\n{'='*18}\n"
-                  f"🔵 신규 진입/청산 신호 없음\n\n")
+        blocks.append("🔵 신규 진입/청산 신호 없음")
+    blocks.append(f"【전 종목 현황 ({len(WATCHLIST)}종목)】")
+    blocks.extend(all_status)           # 각 종목을 개별 블록으로
 
-    # 2) 신호 상세 블록 (있을 때만)
-    detail = ""
-    if sig_count > 0:
-        detail = "【신호 상세】\n" + "\n\n".join(alerts) + f"\n\n{'-'*18}\n"
-
-    # 3) 전 종목 현황 블록 (항상)
-    status_title = f"【전 종목 현황 ({len(WATCHLIST)}종목)】\n"
+    head = f"📊 매매신호 ({now:%m/%d %H:%M})\n{'='*18}\n"
     footer = f"\n{'='*18}\n※신호일뿐 매수/매도 명령아님. 차트·손절선 직접확인."
 
-    # 4) 조립 + 카톡 길이 제한(약 2000자) 대비 분할
-    #    - 첫 메시지: 헤더 + (신호상세) + 현황 시작
-    #    - 넘치면 현황을 여러 메시지로 분할
-    chunks = []
-    cur = header + detail + status_title
-    for line in all_status:
-        if len(cur) + len(line) > 1700:
+    # 블록을 800자 기준으로 메시지로 묶기 (첫 메시지에만 head)
+    chunks, cur = [], ""
+    for b in blocks:
+        add = b + "\n"
+        if len(cur) + len(add) > MAXLEN and cur:
             chunks.append(cur); cur = ""
-        cur += line + "\n"
+        cur += add
     if cur.strip():
         chunks.append(cur)
-    # 마지막에 footer 부착
+    # head/footer 부착
+    chunks[0] = head + chunks[0]
     chunks[-1] = chunks[-1] + footer
 
+    import time
     for i, c in enumerate(chunks):
         tail = f"\n({i+1}/{len(chunks)})" if len(chunks) > 1 else ""
-        send_kakao(token, c + tail)
+        ok = send_kakao(token, c + tail)
+        print(f"    메시지 {i+1}/{len(chunks)} 발송: {'성공' if ok else '실패'} ({len(c)}자)")
+        if i < len(chunks) - 1:
+            time.sleep(1.5)   # 카카오 연속발송 제한 회피
     print(f"  → 전 종목 현황 발송 (신호 {sig_count}건, 카톡 {len(chunks)}개)")
     print("=== 종료 ===")
 
